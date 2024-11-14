@@ -1,0 +1,8 @@
+(executable
+ (name moogle)
+ (libraries a5lib))
+
+(install
+ (section bin)
+ (files
+  (moogle.exe as moogle)))
