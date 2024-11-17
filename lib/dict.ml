@@ -140,14 +140,14 @@ end
 module AssocListDict(D:DICT_ARG) : (DICT with type key = D.key
   with type value = D.value) = 
 struct
-  open Order;;
-  type key = D.key;;
-  type value = D.value;;
-  type dict = (key * value) list;;
+  open Order
+  type key = D.key
+  type value = D.value
+  type dict = (key * value) list
 
   (* INVARIANT: sorted by key, no duplicates *)
 
-  let empty = [] ;;
+  let empty = []
 
   let fold f u = List.fold_left (fun a (k,v) -> f k v a) u
 
