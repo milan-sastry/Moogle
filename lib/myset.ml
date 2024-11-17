@@ -402,7 +402,6 @@ IntListSet.run_tests();;
 
 module IntDictSet = DictSet(IntComparable) ;;
 IntDictSet.run_tests();;
-let _ = print_string("All tests passed!")
 
 
 
