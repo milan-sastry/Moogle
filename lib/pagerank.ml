@@ -118,7 +118,7 @@ end
 (*****************************************************************)
 (* Eigenvalue Ranker                                            *)
 (*****************************************************************)
-(*
+
 
 module type WALK_PARAMS =
 sig
@@ -135,11 +135,102 @@ struct
   module G = GA
   module NS = NSA
 
-  let rank (g : G.graph) =
-  (* TODO - fill this in*)
-end
-*)
+  let dot_product v1 v2 = 
+    List.fold_left2 (fun acc x y -> acc +. (x *. y)) 0. v1 v2
+  
+  (* let _ = Printf.printf "dot_product: %f\n" (dot_product [1.0;2.0;3.0] [4.0;5.0;6.0]) *)
+  
+  let multiply (v:float list) (m:float list list) =
+    List.map (fun row -> dot_product v row) m
+  
+  let print_float_list lst =
+        let rec aux = function
+          | [] -> ()
+          | [x] -> Printf.printf "%f\n" x
+          | x :: xs -> Printf.printf "%f; " x; aux xs
+        in
+        Printf.printf "[";
+        aux lst;
+        Printf.printf "]\n"
+  
+  let print_matrix matrix =
+    List.iter (fun row -> print_float_list row) matrix
+    
+  let transpose matrix =
+    let rec aux acc = function
+      | [] -> List.rev acc
+      | [] :: _ -> List.rev acc
+      | matrix -> aux (List.map List.hd matrix :: acc) (List.map List.tl matrix)
+    in
+    aux [] matrix
 
+  let rank (g : G.graph) =
+    let d = 
+      match P.do_random_jumps with
+        | None -> 0.0
+        | Some x -> x
+    in
+
+    let nodes = (G.nodes g) in
+
+    let n = (List.length nodes) in
+
+    let link_matrix = 
+      transpose (List.rev (List.map (fun node -> 
+        let edges = 
+          match G.outgoing_edges g node with 
+          | None -> []
+          | Some xs -> xs
+        in
+        (* if no links, treat as if links to all *)
+        if edges = [] then 
+          List.init n (fun _ -> 1.0 /. float_of_int n)
+        else 
+          (* each outgoing link gets 1/(num of outgoing links) *)
+          List.rev (List.map (fun node2 -> 
+            if (List.mem (node,node2) edges) then 
+              1.0 /. float_of_int (List.length edges)
+            else
+              0.0) nodes)
+        ) nodes))
+    in
+
+    let _ = print_matrix link_matrix in
+
+    let unit_vector = List.init n (fun _ -> 1.0) in
+    
+    let r_0 = List.init n (fun _ -> 1.0 /. float_of_int n) in
+
+    let find_next_r r_last = 
+      (* (d/N)U *)
+      let random_jumps = List.map (fun x -> x *. (d /. float_of_int n)) unit_vector in
+      (* (1-d)LRₖ *)
+      let link = 
+        List.map (fun x -> x *. (1.0 -. d)) (multiply r_last (link_matrix)) in
+      
+      List.map2 (fun x y -> x +. y) random_jumps link in
+    
+    (* calculates next rank vector step and checks for convergence *)
+    let rec iterate r_last = 
+      let r = find_next_r r_last in
+      let has_converged =
+        let vector_distance v1 v2 = 
+          List.fold_left2 (fun acc x y -> acc +. ((x -. y) ** 2.0)) 0.0 v1 v2 in
+        let square_magnitude = 
+          dot_product r_last r_last in
+        (vector_distance r r_last) < (0.0001 *. square_magnitude)
+        in
+      let _ = Printf.printf "%b\n" has_converged in
+      let _ = print_float_list r in
+      if has_converged then r else iterate r
+    in
+
+    (* updates score map with final rank vector *)
+    let final_r = List.rev (iterate r_0) in
+    let score_map = List.fold_left2 (fun ns node score -> NS.set_score ns node score) 
+      (NS.zero_node_score_map nodes) nodes final_r in
+    NS.normalize score_map
+end
 
 (*******************  TESTS BELOW  *******************)
 
@@ -172,18 +263,15 @@ struct
 
 end
 
-(*
+
 module TestEigenvalueRanker =
 struct 
   module G = NamedGraph
-  let g = G.from_edges [("a","b") ; 
-                        ("b","c") ;
-                        ("c","d") ;
-                        ("d","e") ;
-                        ("e","f") ;
-                        ("a","g") ;
-                        ("g","a")]
-  
+  let g = G.from_edges  [
+    ("a","b");("b","c");("b","a");("c","d");("d","a")
+  ]
+
+                       
   module NS = NodeScore (struct
                            type node = string 
                            let compare = string_compare
@@ -193,14 +281,15 @@ struct
 
   module Ranker = EigenvalueRanker (G) (NS) 
     (struct
-       let do_random_jumps = 0.01
+       let do_random_jumps = Some 0.2
      end)
 
   let ns = Ranker.rank g
-  (*let _ = Printf.printf "Testing EigenvalueRanker:\n NS: %s\n" 
+  let _ = Printf.printf "%s" (G.string_of_graph g)
+  let _ = Printf.printf "Testing EigenvalueRanker:\n NS: %s\n" 
     (NS.string_of_node_score_map ns) 
-  *)
+
 end
-*)
+
 
 
