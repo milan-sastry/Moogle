@@ -1,18 +1,16 @@
 Netids (include all members of group, if partnering):
-  [list here]
+  gc5512, ms1438
 
 In doing this homework I used the following sources:
 
 1. Sources I don't need to mention   [see notes 1 and 4]
 2. Authorized sources  [see notes 2 and 4]
-   [list here]
 3. Unauthorized sources [see notes 3 and 4]
-   [list here]
 
 This paper represents my own work in accordance with University regulations.
 
 Signed,
-[replace this line with your name(s)]
+George Chiriac, Milan Sastry
 ------------------------------------------------------------------------
 
 NOTE 1:   Sources you don't need to mention
