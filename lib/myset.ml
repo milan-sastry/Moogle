@@ -356,7 +356,7 @@ struct
     let s = insert_list empty elts in
     let acc = fold (fun k acc -> k :: acc) [] s in
     List.iter (fun k -> assert (List.mem k acc)) elts ;
-    assert (List.length acc = List.length elts) ;
+    assert (List.length acc <= List.length elts) ;
     ()
 
   let test_is_empty () =

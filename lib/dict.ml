@@ -4,7 +4,9 @@
  * a set of URLs with each word that we find as we crawl the web.
  *)
 exception TODO
-exception INVALID_TREE
+exception UNEXPECTED_LEAF
+exception INVALID_DIRECTION
+exception NOT_FOUND
 
 type direction = Left | Mid | Right ;;
 
@@ -376,7 +378,8 @@ struct
 
   let string_of_dict = string_of_tree
 
-  let balance_2_node (dir: direction) (grow: bool) (l: dict) (k1: key) 
+  (* balance a 2-node after one of its children possibly grew. *)
+  let balance_2_grow (dir: direction) (grow: bool) (l: dict) (k1: key) 
   (v1: value) (r: dict) : (bool * dict) =
     if not grow then false, Two (l, (k1, v1), r)
     else 
@@ -385,34 +388,35 @@ struct
       (match l with
       | Two (l', (k1', v1'), r') ->
         false, Three (l', (k1', v1'), r', (k1, v1), r)
-      | _ -> raise INVALID_TREE)
+      | Three (l', (k1', v1'), m', (k2', v2'), r') -> 
+        true, Two (Two (l', (k1', v1'), m'), (k2', v2'), Two (r', (k1, v1), r))
+      | Leaf -> raise UNEXPECTED_LEAF)
     | Right ->
       (match r with 
       | Two (l', (k1', v1'), r') ->
         false, Three (l, (k1, v1), l', (k1', v1'), r')
-      | _ -> raise INVALID_TREE)
-    | _ -> raise INVALID_TREE
+      | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+        true, Two (Two (l, (k1, v1), l'), (k1', v1'), Two (m', (k2', v2'), r'))
+      | Leaf -> raise UNEXPECTED_LEAF)
+    | _ -> raise INVALID_DIRECTION
 
-  let balance_3_node (dir: direction) (grow: bool) (l: dict) (k1: key)
+  (* balance a 3-node after one of its children possibly grew. *)
+  let balance_3_grow (dir: direction) (grow: bool) (l: dict) (k1: key)
   (v1: value) (m: dict) (k2: key) (v2: value) (r: dict) : (bool * dict) =
     if not grow then false, Three (l, (k1, v1), m, (k2, v2), r)
     else
     match dir with
     | Left ->
-      (match l with
-      | Two _ ->
-        true, Two (l, (k1, v1), Two (m, (k2, v2), r))
-      | _ -> raise INVALID_TREE)
+      true, Two (l, (k1, v1), Two (m, (k2, v2), r))
     | Mid ->
       (match m with
       | Two (l', (k1', v1'), r') ->
         true, Two (Two (l, (k1, v1), l'), (k1', v1'), Two (r', (k2, v2), r))
-      | _ -> raise INVALID_TREE)
+      | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+        true, Two (Two (l, (k1', v1'), l'), (k1', v1'), Three (m', (k2', v2'), r', (k2, v2), r))
+      | _ -> raise UNEXPECTED_LEAF)
     | Right ->
-      (match r with
-      | Two _ ->
-        true, Two (Two(l, (k1, v1), m), (k2, v2), r)
-      | _ -> raise INVALID_TREE)
+      true, Two (Two(l, (k1, v1), m), (k2, v2), r)
 
   (*When insert_to_tree d k v = (grow,d'), that means:
  * d' is a balanced 2-3 tree containing every element of d as well
@@ -425,41 +429,41 @@ struct
     | Two (Leaf, (k1, v1), Leaf) -> 
       (match D.compare k k1 with
       | Eq -> false, Two (Leaf, (k, v), Leaf)
-      | Less -> balance_2_node Left true (Two(Leaf, (k, v), Leaf)) k1 v1 (Leaf)
-      | Greater -> balance_2_node Right true (Leaf) k1 v1  (Two(Leaf, (k, v), Leaf)))
+      | Less -> balance_2_grow Left true (Two(Leaf, (k, v), Leaf)) k1 v1 Leaf
+      | Greater -> balance_2_grow Right true (Leaf) k1 v1  (Two(Leaf, (k, v), Leaf)))
     | Three (Leaf, (k1, v1), Leaf, (k2, v2), Leaf) ->
       (match D.compare k k1 with
       | Eq -> false, Three (Leaf, (k, v), Leaf, (k2, v2), Leaf)
-      | Less -> balance_3_node Left true (Two(Leaf, (k, v), Leaf)) k1 v1 (Leaf) k2 v2 (Leaf)
+      | Less -> balance_3_grow Left true (Two(Leaf, (k, v), Leaf)) k1 v1 (Leaf) k2 v2 Leaf
       | Greater -> 
         (match D.compare k k2 with
-        | Less -> balance_3_node Mid true (Leaf) k1 v1 (Two(Leaf, (k, v), Leaf)) k2 v2 (Leaf)
+        | Less -> balance_3_grow Mid true (Leaf) k1 v1 (Two(Leaf, (k, v), Leaf)) k2 v2 Leaf
         | Eq -> false, Three (Leaf, (k1, v1), Leaf, (k, v), Leaf)
-        | Greater -> balance_3_node Right true (Leaf) k1 v1 (Leaf) k2 v2 (Two(Leaf, (k, v), Leaf))))
+        | Greater -> balance_3_grow Right true (Leaf) k1 v1 (Leaf) k2 v2 (Two(Leaf, (k, v), Leaf))))
     | Two (l, (k1, v1), r) ->
       (match D.compare k k1 with
-        | Eq -> true, Two (l, (k1, v), r)
+        | Eq -> false, Two (l, (k1, v), r)
         | Less -> 
           let grow, l' = insert_to_tree l k v in
-          balance_2_node Left grow l' k1 v1 r
+          balance_2_grow Left grow l' k1 v1 r
         | Greater -> 
           let grow, r' = insert_to_tree r k v in
-          balance_2_node Right grow l k1 v1 r')
+          balance_2_grow Right grow l k1 v1 r')
     | Three (l, (k1, v1), m, (k2, v2), r) ->
       (match D.compare k k1 with
         | Eq -> false, Three (l, (k, v), m, (k2, v2), r)
         | Less ->
           let grow, l' = insert_to_tree l k v in
-          balance_3_node Left grow l' k1 v1 m k2 v2 r
+          balance_3_grow Left grow l' k1 v1 m k2 v2 r
         | Greater ->
           (match D.compare k k2 with
-          | Eq -> true, Three (l, (k1, v1), m, (k, v), r)
+          | Eq -> false, Three (l, (k1, v1), m, (k, v), r)
           | Less ->
             let grow, m' = insert_to_tree m k v in
-            balance_3_node Mid grow l k1 v1 m' k2 v2 r
+            balance_3_grow Mid grow l k1 v1 m' k2 v2 r
           | Greater ->
             let grow, r' = insert_to_tree r k v in
-            balance_3_node Right grow l k1 v1 m k2 v2 r'))
+            balance_3_grow Right grow l k1 v1 m k2 v2 r'))
 
   (* Given a 2-3 tree d, return a new 2-3 tree which
  * additionally contains the pair (k,v)
@@ -470,18 +474,135 @@ struct
   let insert (d: dict) (k: key) (v: value) : dict =
     snd (insert_to_tree d k v)
 
-  (*When remove_from_tree d k v = (shrink, d'), that means:
+  (* balance a 2-node after one of its children possibly shrank.
+  dir is the direction of the child that possibly shrank *)
+  let balance_2_shrink (dir: direction) (shrink: bool) (l: dict) (k1: key) 
+  (v1: value) (r: dict) : (bool * dict) =
+  if shrink = false then false, Two (l, (k1, v1), r) 
+  else
+  match dir with
+  | Left ->
+    (match r with
+    | Two (l', (k1', v1'), r') ->
+      true, Three (l, (k1, v1), l', (k1', v1'), r')
+    | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+      false, Two (Two (l, (k1, v1), l'), (k1', v1'), Two (m', (k2', v2'), r'))
+    | _ -> raise UNEXPECTED_LEAF)
+  | Right ->
+    (match l with
+    | Two (l', (k1', v1'), r') ->
+      true, Three (l', (k1', v1'), r', (k1, v1), r)
+    | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+      false, Two (Two (l', (k1', v1'), m'), (k2', v2'), Two (r', (k1, v1), r))
+    | _ -> raise UNEXPECTED_LEAF)
+  | _ -> raise INVALID_DIRECTION
+
+  (* balance a 3-node after one of its children possibly shrank.
+  dir is the direction of the child that possibly shrank *)
+  let balance_3_shrink (dir: direction) (shrink: bool) (l: dict) (k1: key)
+  (v1: value) (m: dict) (k2: key) (v2: value) (r: dict) =
+  if shrink = false then false, Three (l, (k1, v1), m, (k2, v2), r) 
+  else
+  match dir with
+  | Left ->
+    (match m with
+    | Two (l', (k1', v1'), r') ->
+      false, Two (Three (l, (k1, v1), l', (k1', v1'), r'), (k2, v2), r)
+    | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+      false, Three (Two (l, (k1, v1), l'), (k1', v1'), Two (m', (k2', v2'), r'), (k2, v2), r)
+    | _ -> raise UNEXPECTED_LEAF)
+  | Mid ->
+    (match l with
+    | Two (l', (k1', v1'), r') ->
+      false, Two (Three (l', (k1', v1'), r', (k1, v1), m), (k2, v2), r)
+    | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+      false, Three (Two (l', (k1', v1'), m'), (k2', v2'), Two (r', (k1, v1), m), (k2, v2), r)
+    | _ -> raise UNEXPECTED_LEAF)
+  | Right ->
+    (match m with
+    | Two (l', (k1', v1'), r') ->
+      false, Two (l, (k1, v1), Three (l', (k1', v1'), r', (k2, v2), r))
+    | Three (l', (k1', v1'), m', (k2', v2'), r') ->
+      false, Three (l, (k1, v1), Two (l', (k1', v1'), m'), (k2', v2'), Two (r', (k2, v2), r))
+    | _ -> raise UNEXPECTED_LEAF)
+
+  (* remove leftmost node of a 2-3 tree, returning its (key,value) pair along
+  with the updated tree *)
+  let rec choose_leftmost (d: dict) : (bool * key * value * dict) =
+    match d with
+    | Leaf -> raise NOT_FOUND
+    | Two (Leaf, (k1, v1), Leaf) -> true, k1, v1, Leaf
+    | Three (Leaf, (k1, v1), Leaf, (k2, v2), Leaf) -> 
+      false, k1, v1, Two (Leaf, (k2, v2), Leaf)
+    | Two (l, (k1, v1), r) ->
+      let shrink, k1', v1', l' = choose_leftmost l in
+      (match balance_2_shrink Left shrink l' k1 v1 r with
+      | (fst, snd) -> fst , k1', v1', snd)
+    | Three (l, (k1, v1), m, (k2, v2), r) ->
+      let shrink, k1', v1', l' = choose_leftmost l in
+      (match balance_3_shrink Left shrink l' k1 v1 m k2 v2 r with
+      | (fst, snd) -> fst, k1', v1', snd)
+
+  (* When remove_from_tree d k v = (shrink, d'), that means:
  * if shrink then height(d') = height(d)-1 else height(d') = height(d);
  * and d' is a balanced 2-3 tree containing every element of d except
  * the element (k,v).
  *)
   let rec remove_from_tree (d: dict) (k: key) : (bool * dict) =
-    raise TODO
+    (* go down until you find k *)
+    (* once you found k, call choose_leftmost on k's right subtree. use the 
+    returned values to 1) update the current k,v, 2) set shrink to the correct
+    thing, and 3) replace k's right subtree with the one returned by 
+    choose_leftmost. After thatt, return in the callstack and rebalance at
+    each level. *)
+    match d with
+    | Leaf -> false, Leaf
+    | Two (Leaf, (k1, v1), Leaf) ->
+      (match D.compare k k1 with
+      | Eq -> true, Leaf
+      | _ -> false, d)
+    | Three (Leaf, (k1, v1), Leaf, (k2, v2), Leaf) ->
+      (match D.compare k k1 with
+      | Eq -> false, Two (Leaf, (k2, v2), Leaf)
+      | Less -> false, d
+      | Greater ->
+        (match D.compare k k2 with
+        | Eq -> false, Two (Leaf, (k1, v1), Leaf)
+        | _ -> false, d))
+    | Two (l, (k1, v1), r) ->
+      (match D.compare k k1 with
+      | Eq ->
+        let shrink, k1', v1', r' = choose_leftmost r in
+        balance_2_shrink Right shrink l k1' v1' r'
+      | Less -> 
+        let shrink, l' = remove_from_tree l k in
+        balance_2_shrink Left shrink l' k1 v1 r
+      | Greater ->
+        let shrink, r' = remove_from_tree r k in
+        balance_2_shrink Right shrink l k1 v1 r')
+    | Three (l, (k1, v1), m, (k2, v2), r) ->
+      (match D.compare k k1 with
+      | Eq ->
+        let shrink, k1', v1', m' = choose_leftmost m in
+        balance_3_shrink Mid shrink l k1' v1' m' k2 v2 r
+      | Less ->
+        let shrink, l' = remove_from_tree l k in
+        balance_3_shrink Left shrink l' k1 v1 m k2 v2 r
+      | Greater ->
+        (match D.compare k k2 with
+        | Eq ->
+          let shrink, k2', v2', r' = choose_leftmost r in
+          balance_3_shrink Right shrink l k1 v1 m k2' v2' r'
+        | Less ->
+          let shrink, m' = remove_from_tree m k in
+          balance_3_shrink Mid shrink l k1 v1 m' k2 v2 r
+        | Greater ->
+          let shrink, r' = remove_from_tree r k in
+          balance_3_shrink Right shrink l k1 v1 m k2 v2 r'))
 
 (* given a 2-3 tree d, return a 2-3 without element k *)
   let remove (d: dict) (k: key) : dict =
     snd (remove_from_tree d k)
-
 
   (* TODO:
    * Write a lookup function that returns the value of the given key
@@ -528,7 +649,10 @@ struct
    * as an option this (key,value) pair along with the new dictionary. 
    * If our dictionary is empty, this should return None. *)
   let choose (d: dict) : (key * value * dict) option =
-    raise TODO
+    match d with
+    | Leaf -> None
+    | _ -> let (_, k, v, d') = choose_leftmost d in
+    Some (k, v, d')
 
   (* TODO:
    * Write a function that when given a 2-3 tree (represented by our
@@ -634,10 +758,11 @@ struct
     assert(not (balanced d7)) ;
     ()
 
-(*
+
   let test_remove_nothing () =
     let pairs1 = generate_pair_list 26 in
     let d1 = insert_list empty pairs1 in
+    assert(balanced d1) ;
     let r2 = remove d1 (D.gen_key_lt (D.gen_key()) ()) in
     List.iter (fun (k,v) -> assert(lookup r2 k = Some v)) pairs1 ;
     assert(balanced r2) ;
@@ -653,6 +778,7 @@ struct
   let test_remove_in_order () =
     let pairs1 = generate_pair_list 26 in
     let d1 = insert_list empty pairs1 in
+    assert(balanced d1) ;
     List.iter 
       (fun (k,v) -> 
         let r = remove d1 k in
@@ -668,6 +794,7 @@ struct
   let test_remove_reverse_order () =
     let pairs1 = generate_pair_list 26 in
     let d1 = insert_list_reversed empty pairs1 in
+    assert(balanced d1) ;
     List.iter 
       (fun (k,v) -> 
         let r = remove d1 k in
@@ -683,19 +810,98 @@ struct
   let test_remove_random_order () =
     let pairs5 = generate_random_list 100 in
     let d5 = insert_list empty pairs5 in
+    assert(balanced d5) ;
     let r5 = List.fold_right (fun (k,_) d -> remove d k) pairs5 d5 in
     List.iter (fun (k,_) -> assert(not (member r5 k))) pairs5 ;
     assert(r5 = empty) ;
     assert(balanced r5) ;
-    () *)
+    ()
+
+  let test_insert_single_pair () =
+    let k = D.gen_key () in
+    let v = D.gen_value () in
+    let d = empty in
+    let d' = insert d k v in
+    assert(lookup d' k = Some v);
+    assert(balanced d');
+    assert(height d' = 1);
+    ()
+  
+  let test_lookup_empty_tree () =
+    let k = D.gen_key () in
+    let d = empty in
+    assert(lookup d k = None);
+    ()
+  
+  let test_member_empty_tree () =
+    let k = D.gen_key () in
+    let d = empty in
+    assert(not (member d k));
+    ()
+  
+  let test_insert_list () =
+    let pairs = generate_pair_list 10 in
+    let d = insert_list empty pairs in
+    List.iter (fun (k, v) -> assert(lookup d k = Some v)) pairs;
+    assert(balanced d);
+    ()
+  
+  let test_choose_empty_tree () =
+    let d = empty in
+    assert(choose d = None);
+    ()
+  
+  let test_choose () =
+    let pairs = generate_pair_list 10 in
+    let d = insert_list empty pairs in
+    match choose d with
+    | Some (k, v, d') ->
+        assert(lookup d' k = None);
+        assert(balanced d');
+    | None -> 
+    ()
+  
+  let test_height () =
+    let d = empty in
+    assert(height d = 0);
+    let pairs = generate_pair_list 10 in
+    let d = insert_list empty pairs in
+    let expected_height = 3 in
+    assert(height d = expected_height);
+    ()
+  
+  let test_member () =
+    let pairs = generate_pair_list 10 in
+    let d = insert_list empty pairs in
+    List.iter (fun (k, _) -> assert(member d k)) pairs;
+    let k = D.gen_key_lt (fst (List.hd pairs)) () in
+    assert(not (member d k));
+    ()
+  
+  let test_lookup () =
+    let pairs = generate_pair_list 10 in
+    let d = insert_list empty pairs in
+    List.iter (fun (k, v) -> assert(lookup d k = Some v)) pairs;
+    let k = D.gen_key_lt (fst (List.hd pairs)) () in
+    assert(lookup d k = None);
+    ()
 
   let run_tests () = 
-   test_balance() ;
-(*    test_remove_nothing() ;
-    test_remove_from_nothing() ;
-    test_remove_in_order() ;
-    test_remove_reverse_order() ;
-    test_remove_random_order() ; *)
+    test_balance();
+    test_remove_nothing();
+    test_remove_from_nothing();
+    test_remove_in_order();
+    test_remove_reverse_order();
+    test_remove_random_order();
+    test_insert_single_pair();
+    test_lookup_empty_tree();
+    test_member_empty_tree();
+    test_insert_list();
+    test_choose_empty_tree();
+    test_choose();
+    test_height();
+    test_member();
+    test_lookup();
     ()
 
 end
@@ -732,6 +938,6 @@ module Make (D:DICT_ARG) : (DICT with type key = D.key
   with type value = D.value) = 
   (* Change this line to the BTDict implementation when you are
    * done implementing your 2-3 trees. *)
-  AssocListDict(D)
-  (* BTDict(D) *)
+  (* AssocListDict(D) *)
+  BTDict(D)
 
