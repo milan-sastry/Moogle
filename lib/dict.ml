@@ -4,6 +4,9 @@
  * a set of URLs with each word that we find as we crawl the web.
  *)
 exception TODO
+exception INVALID_TREE
+
+type direction = Left | Mid | Right ;;
 
 module type DICT = 
 sig
@@ -274,13 +277,11 @@ end
 (* BTDict: a functor that implements our DICT signature           *)
 (* using a balanced tree (2-3 trees)                              *)
 (******************************************************************)
-(*
+
 module BTDict(D:DICT_ARG) : (DICT with type key = D.key
 with type value = D.value) =
 struct
   open Order
-
-  exception TODO
 
   type key = D.key
   type value = D.value
@@ -326,7 +327,17 @@ struct
   (* TODO:
    * Implement fold. Read the specification in the DICT signature above. *)
   let rec fold (f: key -> value -> 'a -> 'a) (u: 'a) (d: dict) : 'a =
-    raise TODO
+    match d with
+    | Leaf -> u
+    | Two (l, (k, v), r) ->
+      let ul = fold f u l in
+      let ur = fold f ul r in
+      f k v ur
+    | Three (l, (k1, v1), m, (k2, v2), r) ->
+      let ul = fold f u l in
+      let um = fold f ul m in
+      let ur = fold f um r in
+      f k1 v1 (f k2 v2 ur)
 
   (* TODO:
    * Implement these to-string functions
@@ -334,9 +345,8 @@ struct
    * crashing the program if run while not implemented even if they 
    * are not called (cf of_dict, which is already a function). When 
    * you implement them, you can remove the function wrappers *)
-  let string_of_key = (fun _ -> raise TODO)
-  let string_of_value = (fun _ -> raise TODO)
-  let string_of_dict (d: dict) : string = raise TODO
+  let string_of_key = D.string_of_key
+  let string_of_value = D.string_of_value
       
   (* Debugging function. This will print out the tree in text format.
    * Use this function to see the actual structure of your 2-3 tree. *
@@ -364,14 +374,92 @@ struct
         ^ (string_of_tree middle) ^ ",(" ^ (string_of_key k2) ^ "," 
         ^ (string_of_value v2) ^ ")," ^ (string_of_tree right) ^ ")"
 
+  let string_of_dict = string_of_tree
+
+  let balance_2_node (dir: direction) (grow: bool) (l: dict) (k1: key) 
+  (v1: value) (r: dict) : (bool * dict) =
+    if not grow then false, Two (l, (k1, v1), r)
+    else 
+    match dir with
+    | Left -> 
+      (match l with
+      | Two (l', (k1', v1'), r') ->
+        false, Three (l', (k1', v1'), r', (k1, v1), r)
+      | _ -> raise INVALID_TREE)
+    | Right ->
+      (match r with 
+      | Two (l', (k1', v1'), r') ->
+        false, Three (l, (k1, v1), l', (k1', v1'), r')
+      | _ -> raise INVALID_TREE)
+    | _ -> raise INVALID_TREE
+
+  let balance_3_node (dir: direction) (grow: bool) (l: dict) (k1: key)
+  (v1: value) (m: dict) (k2: key) (v2: value) (r: dict) : (bool * dict) =
+    if not grow then false, Three (l, (k1, v1), m, (k2, v2), r)
+    else
+    match dir with
+    | Left ->
+      (match l with
+      | Two _ ->
+        true, Two (l, (k1, v1), Two (m, (k2, v2), r))
+      | _ -> raise INVALID_TREE)
+    | Mid ->
+      (match m with
+      | Two (l', (k1', v1'), r') ->
+        true, Two (Two (l, (k1, v1), l'), (k1', v1'), Two (r', (k2, v2), r))
+      | _ -> raise INVALID_TREE)
+    | Right ->
+      (match r with
+      | Two _ ->
+        true, Two (Two(l, (k1, v1), m), (k2, v2), r)
+      | _ -> raise INVALID_TREE)
 
   (*When insert_to_tree d k v = (grow,d'), that means:
  * d' is a balanced 2-3 tree containing every element of d as well
  * as the element (k,v).  If grow then height(d') = height(d)+1 else
  * height(d') = height(d).
  *)
- let rec insert_to_tree (d: dict) (k: key) (v: value) : (bool * dict) =
-   raise TODO
+  let rec insert_to_tree (d: dict) (k: key) (v: value) : (bool * dict) =
+    match d with
+    | Leaf -> true, Two (Leaf, (k, v), Leaf)
+    | Two (Leaf, (k1, v1), Leaf) -> 
+      (match D.compare k k1 with
+      | Eq -> false, Two (Leaf, (k, v), Leaf)
+      | Less -> balance_2_node Left true (Two(Leaf, (k, v), Leaf)) k1 v1 (Leaf)
+      | Greater -> balance_2_node Right true (Leaf) k1 v1  (Two(Leaf, (k, v), Leaf)))
+    | Three (Leaf, (k1, v1), Leaf, (k2, v2), Leaf) ->
+      (match D.compare k k1 with
+      | Eq -> false, Three (Leaf, (k, v), Leaf, (k2, v2), Leaf)
+      | Less -> balance_3_node Left true (Two(Leaf, (k, v), Leaf)) k1 v1 (Leaf) k2 v2 (Leaf)
+      | Greater -> 
+        (match D.compare k k2 with
+        | Less -> balance_3_node Mid true (Leaf) k1 v1 (Two(Leaf, (k, v), Leaf)) k2 v2 (Leaf)
+        | Eq -> false, Three (Leaf, (k1, v1), Leaf, (k, v), Leaf)
+        | Greater -> balance_3_node Right true (Leaf) k1 v1 (Leaf) k2 v2 (Two(Leaf, (k, v), Leaf))))
+    | Two (l, (k1, v1), r) ->
+      (match D.compare k k1 with
+        | Eq -> true, Two (l, (k1, v), r)
+        | Less -> 
+          let grow, l' = insert_to_tree l k v in
+          balance_2_node Left grow l' k1 v1 r
+        | Greater -> 
+          let grow, r' = insert_to_tree r k v in
+          balance_2_node Right grow l k1 v1 r')
+    | Three (l, (k1, v1), m, (k2, v2), r) ->
+      (match D.compare k k1 with
+        | Eq -> false, Three (l, (k, v), m, (k2, v2), r)
+        | Less ->
+          let grow, l' = insert_to_tree l k v in
+          balance_3_node Left grow l' k1 v1 m k2 v2 r
+        | Greater ->
+          (match D.compare k k2 with
+          | Eq -> true, Three (l, (k1, v1), m, (k, v), r)
+          | Less ->
+            let grow, m' = insert_to_tree m k v in
+            balance_3_node Mid grow l k1 v1 m' k2 v2 r
+          | Greater ->
+            let grow, r' = insert_to_tree r k v in
+            balance_3_node Right grow l k1 v1 m k2 v2 r'))
 
   (* Given a 2-3 tree d, return a new 2-3 tree which
  * additionally contains the pair (k,v)
@@ -400,19 +488,39 @@ struct
    * in our dictionary and returns it as an option, or return None
    * if the key is not in our dictionary. *)
   let rec lookup (d: dict) (k: key) : value option =
-    raise TODO
+    match d with
+    | Leaf -> None
+    | Two (l, (k1, v1), r) -> 
+      (match D.compare k k1 with
+      | Less -> lookup l k
+      | Eq -> Some v1
+      | Greater -> lookup r k)
+    | Three (l, (k1, v1), m, (k2, v2), r) -> 
+      (match D.compare k k1 with
+      | Less -> lookup l k
+      | Eq -> Some v1
+      | Greater -> 
+        match D.compare k k2 with
+        | Less -> lookup m k
+        | Eq -> Some v2
+        | Greater -> lookup r k)
 
   (* TODO:
    * Write a height function that takes a dictonary as an argument and
    * returns the distance between the top of the tree and a leaf. A tree
    * consisting of just a leaf should have height 0.*)
   let rec height (d: dict) : int =
-    raise TODO
+    match d with 
+    | Leaf -> 0
+    | Two (l, _, _) -> height l + 1
+    | Three (l, _, _, _, _) -> height l + 1
 
   (* TODO:
    * Write a function to test whether a given key is in our dictionary *)
-  let member (d: dict) (k: key) : bool =
-    raise TODO
+  let rec member (d: dict) (k: key) : bool =
+    match lookup d k with
+    | None -> false
+    | Some _ -> true
 
   (* TODO:
    * Write a function that removes any (key,value) pair from our 
@@ -430,10 +538,28 @@ struct
 
   (* How are you testing that you tree is balanced? 
    * ANSWER: 
-   *    _______________
+   *    Recursively calculate the heights of the left, middle (if applicable),
+   *    and right subtrees. If at any point the heights of any two children
+   *    are different, return false. Otherwise return true.
+   *    Note that every node is accessed once, so complexity is O(n).
    *)
   let rec balanced (d: dict) : bool =
-    raise TODO
+    let rec height_aux (d: dict) : int = 
+      match d with
+      | Leaf -> 0
+      | Two (l, _, r) -> 
+        let hl = height_aux l in
+        let hr = height_aux r in
+        if (hl = hr) && (hl != -1) then hl + 1
+        else -1
+      | Three (l, _, m, _, r) -> 
+        let hl = height_aux l in
+        let hm = height_aux m in
+        let hr = height_aux r in
+        if (hl = hm) && (hl = hr) && (hl != -1) then hl + 1
+        else -1
+    in
+    height_aux d != -1
 
 
   (********************************************************************)
@@ -466,7 +592,7 @@ struct
     else 
       (D.gen_key_random(), D.gen_value()) :: (generate_random_list (size - 1))
 
-(*
+
   let test_balance () =
     let d1 = Leaf in
     assert(balanced d1) ;
@@ -506,7 +632,7 @@ struct
                    D.gen_pair(),Leaf,D.gen_pair(),Two(Leaf,D.gen_pair(),Leaf))
     in
     assert(not (balanced d7)) ;
-    () *)
+    ()
 
 (*
   let test_remove_nothing () =
@@ -564,7 +690,7 @@ struct
     () *)
 
   let run_tests () = 
-(*    test_balance() ; *)
+   test_balance() ;
 (*    test_remove_nothing() ;
     test_remove_from_nothing() ;
     test_remove_in_order() ;
@@ -573,7 +699,7 @@ struct
     ()
 
 end
-*)
+
 
 
 
@@ -591,10 +717,10 @@ IntStringListDict.run_tests();;
  * 
  * Uncomment out the lines below when you are ready to test your
  * 2-3 tree implementation. *)
-(*
+
 module IntStringBTDict = BTDict(IntStringDictArg) ;;
 IntStringBTDict.run_tests();;
-*)
+
 
 
 
