@@ -195,7 +195,7 @@ struct
         ) nodes))
     in
 
-    let _ = print_matrix link_matrix in
+    (* let _ = print_matrix link_matrix in *)
 
     let unit_vector = List.init n (fun _ -> 1.0) in
     
@@ -220,8 +220,8 @@ struct
           dot_product r_last r_last in
         (vector_distance r r_last) < (0.0001 *. square_magnitude)
         in
-      let _ = Printf.printf "%b\n" has_converged in
-      let _ = print_float_list r in
+      (* let _ = Printf.printf "%b\n" has_converged in *)
+      (* let _ = print_float_list r in *)
       if has_converged then r else iterate r
     in
 
@@ -281,14 +281,23 @@ struct
 
   module Ranker = EigenvalueRanker (G) (NS) 
     (struct
-       let do_random_jumps = Some 0.2
+       let do_random_jumps = Some 0.0
      end)
 
   let ns = Ranker.rank g
-  let _ = Printf.printf "%s" (G.string_of_graph g)
   let _ = Printf.printf "Testing EigenvalueRanker:\n NS: %s\n" 
     (NS.string_of_node_score_map ns) 
 
+  let () =
+    assert ((NS.get_score ns "a") = Some 0.333984375);
+    assert ((NS.get_score ns "b") = Some 0.33203125);
+    assert ((NS.get_score ns "c") = Some 0.166015625);
+    assert ((NS.get_score ns "d") = Some 0.16796875);
+    assert ((NS.get_score ns "e") = None);
+    Printf.printf "All tests passed!\n"
+
+  (* let _ = Printf.printf "%s" (G.string_of_graph g) *)
+  
 end
 
 
